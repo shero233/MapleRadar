@@ -15,6 +15,14 @@ if 'user_state' not in st.session_state:
         "energy_val": 5
     }
 
+def fetch_live_toronto_status():
+    import random
+    events = [
+        {"type": "Weather", "desc": "Extreme Cold Alert (-20°C)", "effect": "Low_Energy", "impact": -2},
+        {"type": "TTC", "desc": "Subway Line 1: Signal Issues", "effect": "2hr_Travel", "impact": -120},
+        {"type": "Economic", "desc": "Loblaws 30% Price Surge", "effect": "Stress", "impact": 1}
+    ]
+    return random.choice(events) 
 
 def apply_effect(chain):
     state = st.session_state.user_state
@@ -126,13 +134,47 @@ TASK_FAILURE_LOGIC = {
 col1, col2 = st.columns([2, 1])
 
 with col1:
+    st.subheader("📡 Live Toronto Pulse")
+    live_c1, live_c2 = st.columns([1, 2])
+    with live_c1:
+        if st.button("🔄 Sync Live Data", use_container_width=True):
+        
+            import random
+            live_events = [
+                {"type": "Weather", "desc": "Extreme Cold Alert (-20°C)", "effect": "Low_Energy", "chain": "Severe_Cold -> Heating_Usage_Up -> Hydro_Bill_Surge -> Financial_Stress"},
+                {"type": "TTC", "desc": "Line 1 Subway Delay", "effect": "Time_Lost", "chain": "Signal_Issues -> Subway_Stop -> 1hr_Delay -> Late_for_Commitment"},
+                {"type": "Economic", "desc": "Food Price Index Up 5%", "effect": "Budget_Squeeze", "chain": "Supply_Chain_Issue -> Grocery_Cost_Up -> Less_Savings -> Anxiety"}
+            ]
+            selected_event = random.choice(live_events)
+            st.session_state.current_live_event = selected_event
+            
+            
+            if selected_event["type"] == "TTC":
+                st.session_state.user_state["available_time"] = max(0, st.session_state.user_state["available_time"] - 60)
+            elif selected_event["type"] == "Weather":
+                st.session_state.user_state["energy_val"] = max(0, st.session_state.user_state["energy_val"] - 2)
+            
+            st.rerun()
+
+    with live_c2:
+        if "current_live_event" in st.session_state:
+            ev = st.session_state.current_live_event
+            st.info(f"**{ev['type']}**: {ev['desc']} (Impact: {ev['effect']})")
+        else:
+            st.caption("Waiting for real-time synchronization...")
+
+    st.divider()
+
     user_input = st.text_input("Search a situation...", placeholder="e.g. Rent, TTC...", key="main_search").strip().lower()
     
     final_logic = ""
+    is_task_risk = False
     
+
     if "failure_chain" in st.session_state and st.session_state.failure_chain:
         final_logic = st.session_state.failure_chain
-        st.warning("🚨 CONSEQUENCE ANALYSIS: Impact of Failed Task")
+        is_task_risk = True
+        st.warning("🚨 CONSEQUENCE ANALYSIS: Impact of Potential Task Failure")
         if st.button("⬅️ Back to Global Scenarios"):
             st.session_state.failure_chain = None
             st.rerun()
@@ -144,19 +186,25 @@ with col1:
             st.error(f"No results found for '{user_input}'.")
     elif selected_display != "🔍 Search":
         final_logic = TORONTO_KNOWLEDGE_BASE.get(selected_display)
+    elif "current_live_event" in st.session_state:
+        final_logic = st.session_state.current_live_event["chain"]
 
     if final_logic:
-        current_scenario = next((k for k, v in TORONTO_KNOWLEDGE_BASE.items() if v == final_logic), "Task Failure Impact")
+        current_scenario = next((k for k, v in TORONTO_KNOWLEDGE_BASE.items() if v == final_logic), "Live System Update")
         st.subheader(f"Analyzing: {current_scenario}")
         
         if st.button("🚨 Simulate Impact", use_container_width=True):
             apply_effect(final_logic)
-            st.toast("System State Updated!", icon="🍁")
+            st.toast("System State Updated via Logic Chain!", icon="🍁")
 
-        G = build_flexible_graph(final_logic)
-        components.html(render_graph_html(G), height=500)
+        G = nx.DiGraph()
+        steps = [s.strip().replace("_", " ") for s in final_logic.split("->")]
+        for i in range(len(steps) - 1):
+            G.add_edge(steps[i], steps[i+1])
+        
+        components.html(render_graph_html(G), height=450)
     else:
-        st.info("👋 Welcome! Use the search or sidebar to begin.")
+        st.info("👋 Welcome! Use 'Sync Live Data' to fetch real Toronto conditions or search a scenario.")
 
 with col2:
     st.subheader("Survival Analytics")
