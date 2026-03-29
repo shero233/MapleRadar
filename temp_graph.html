@@ -88,8 +88,8 @@
                   
 
                   // parsing and collecting nodes and edges from the python
-                  nodes = new vis.DataSet([{"color": "#386939", "font": {"color": "#386939"}, "id": "TTC Delay", "label": "TTC Delay", "shape": "dot", "size": 20}, {"color": "#386939", "font": {"color": "#386939"}, "id": "Late for Work", "label": "Late for Work", "shape": "dot", "size": 20}, {"color": "#386939", "font": {"color": "#386939"}, "id": "Wage Deduction", "label": "Wage Deduction", "shape": "dot", "size": 20}, {"color": "#386939", "font": {"color": "#386939"}, "id": "Mental Stress", "label": "Mental Stress", "shape": "dot", "size": 20}]);
-                  edges = new vis.DataSet([{"arrows": "to", "color": "#93A989", "from": "TTC Delay", "to": "Late for Work"}, {"arrows": "to", "color": "#93A989", "from": "Late for Work", "to": "Wage Deduction"}, {"arrows": "to", "color": "#93A989", "from": "Wage Deduction", "to": "Mental Stress"}]);
+                  nodes = new vis.DataSet([{"color": "#386939", "font": {"color": "#386939"}, "id": "Task Incomplete", "label": "Task Incomplete", "shape": "dot", "size": 20}, {"color": "#386939", "font": {"color": "#386939"}, "id": "Stress Increase", "label": "Stress Increase", "shape": "dot", "size": 20}, {"color": "#386939", "font": {"color": "#386939"}, "id": "Productivity Loss", "label": "Productivity Loss", "shape": "dot", "size": 20}, {"color": "#386939", "font": {"color": "#386939"}, "id": "Burnout", "label": "Burnout", "shape": "dot", "size": 20}]);
+                  edges = new vis.DataSet([{"arrows": "to", "color": "#93A989", "from": "Task Incomplete", "to": "Stress Increase"}, {"arrows": "to", "color": "#93A989", "from": "Stress Increase", "to": "Productivity Loss"}, {"arrows": "to", "color": "#93A989", "from": "Productivity Loss", "to": "Burnout"}]);
 
                   nodeColors = {};
                   allNodes = nodes.get({ returnType: "Object" });

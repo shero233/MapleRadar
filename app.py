@@ -116,50 +116,54 @@ with st.sidebar:
 # --- 7. Main Content ---
 st.title("🇨🇦 MapleRadar")
 
+TASK_FAILURE_LOGIC = {
+    "Assignment": "Miss_Deadline -> Grade_Drop -> Academic_Probation -> Visa_Risk",
+    "Rent": "Late_Payment -> Landlord_Warning -> Eviction_Notice -> Homelessness",
+    "Work": "Miss_Shift -> Manager_Displeasure -> Job_Loss -> Financial_Crisis",
+    "Default": "Task_Incomplete -> Stress_Increase -> Productivity_Loss -> Burnout"
+}
+
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    user_input = st.text_input("Search a situation...", placeholder="e.g. Rent, TTC, Loblaws...", key="main_search").strip().lower()
+    user_input = st.text_input("Search a situation...", placeholder="e.g. Rent, TTC...", key="main_search").strip().lower()
     
     final_logic = ""
     
-    
-    if user_input:
+    if "failure_chain" in st.session_state and st.session_state.failure_chain:
+        final_logic = st.session_state.failure_chain
+        st.warning("🚨 CONSEQUENCE ANALYSIS: Impact of Failed Task")
+        if st.button("⬅️ Back to Global Scenarios"):
+            st.session_state.failure_chain = None
+            st.rerun()
+    elif user_input:
         match = next((val for key, val in TORONTO_KNOWLEDGE_BASE.items() 
                      if user_input in key.lower() or user_input in val.lower()), None)
         final_logic = match
         if not final_logic:
-            st.error(f"No results found for '{user_input}'. Try 'Rent' or 'TTC'.")
+            st.error(f"No results found for '{user_input}'.")
     elif selected_display != "🔍 Search":
         final_logic = TORONTO_KNOWLEDGE_BASE.get(selected_display)
 
-    # 3. 渲染图形
     if final_logic:
-        current_scenario = next((k for k, v in TORONTO_KNOWLEDGE_BASE.items() if v == final_logic), "Custom Scenario")
+        current_scenario = next((k for k, v in TORONTO_KNOWLEDGE_BASE.items() if v == final_logic), "Task Failure Impact")
         st.subheader(f"Analyzing: {current_scenario}")
         
         if st.button("🚨 Simulate Impact", use_container_width=True):
             apply_effect(final_logic)
-            st.toast(f"Impact of {current_scenario} applied!", icon="🍁") # 增加动态小气泡提示
+            st.toast("System State Updated!", icon="🍁")
 
         G = build_flexible_graph(final_logic)
-        
-        html_data = render_graph_html(G)
-        components.html(html_data, height=500)
+        components.html(render_graph_html(G), height=500)
     else:
-
-        st.info("👋 Welcome! Search a situation above or select a scenario from the sidebar to visualize its impact.")
+        st.info("👋 Welcome! Use the search or sidebar to begin.")
 
 with col2:
     st.subheader("Survival Analytics")
     s = st.session_state.user_state
     
-    c1, c2 = st.columns(2)
-    c1.metric("Available Time", f"{s['available_time']}m")
-    c2.metric("Energy", s['energy_level'].upper())
-    
-    st.markdown("---")
-    st.subheader("Smart Reschedule") # 改个更有科技感的标题
+    st.divider()
+    st.subheader("Smart Reschedule")
     
     if st.session_state.tasks:
         scored_tasks = []
@@ -170,9 +174,24 @@ with col2:
         scored_tasks.sort(key=lambda x: x[0], reverse=True)
         
         for score, t in scored_tasks:
-            status_icon = "🔴" if score > 0.8 else ("🟡" if score > 0.5 else "🟢")
+            is_overdue = t['deadline'] < datetime.now()
+            status_icon = "❌" if is_overdue else ("🔴" if score > 0.7 else "🟡")
+            
             with st.expander(f"{status_icon} {t['title']} (Priority: {score:.2f})"):
                 st.write(f"**Deadline:** {t['deadline'].date()}")
-                st.write(f"**Energy Required:** {t['energy_required']}")
+                
+                fail_logic = next((v for k, v in TASK_FAILURE_LOGIC.items() if k.lower() in t['title'].lower()), TASK_FAILURE_LOGIC["Default"])
+                
+                if is_overdue:
+                    st.error("⚠️ TASK OVERDUE!")
+                    if st.button("Analyze Consequence", key=f"fail_{t['title']}"):
+                        st.session_state.failure_chain = fail_logic
+                        st.rerun()
+                else:
+                    st.info("Status: Pending")
+                    if st.button("Preview Failure Risk", key=f"risk_{t['title']}", help="如果此任务未完成，会触发什么连锁反应？"):
+                        st.session_state.failure_chain = fail_logic
+                        st.session_state.is_prediction = True 
+                        st.rerun()
     else:
         st.write("No tasks to prioritize. Stay chill! ☕")
