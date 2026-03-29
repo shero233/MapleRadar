@@ -74,30 +74,46 @@ def parse_scenario(chain):
     return steps
 
 
-def apply_effect(step,state):
-    #Applys the life event effect to current state
-    if "2hrs_Lost" in step:
-        state["available_time"] = max(0, state['available_time'] - 120)
-    elif "Long_Commute" in step:
-        state["availabe_hours"] = max(0, state["available_time"] - 60)
-    elif "Stress" in step or "Anxiety" in step or "Burnout" in step or "Physical_&_Mental_Burnout" in step  or "Emotional_Strain" in step or "Health_&_Mood_Deteriorate" in step:
-        state["energy"] = max(0, state["available_hours"] - 1)
-    elif "Late" in step:
-        state["Stress_level"] += 1
+def apply_effect(chain):
+    state = st.session_state.user_state
+    steps = chain.split("->")
+    for step in steps:
+        step = step.strip()
+        if any(k in step for k in ["Lost", "Travel", "Commute", "Delay"]):
+            state["available_time"] = max(0, state['available_time'] - 60) # 每次跳跃扣除1小时
+            
+        
+        if any(k in step for k in ["Stress", "Anxiety", "Burnout", "Depression", "Struggle"]):
+            state["energy_val"] = max(0, state["energy_val"] - 2)
+            state["stress_level"] += 2
+            
+        
+        if any(k in step for k in ["Risk", "Warning", "Penalty", "Debt"]):
+            state["stress_level"] += 3
 
-    return state
+    
+    if state["energy_val"] <= 3: state["energy_level"] = "low"
+    elif state["energy_val"] >= 7: state["energy_level"] = "high"
+    else: state["energy_level"] = "medium"
 
 
 def score_task(task, state):
     days_left = max(0, (task["deadline"] - datetime.now()).days)
-    urgency  = 1 / (1+ days_left)
-    energy_score = 0
+    urgency = 2 / (1 + days_left) # 增加权重
+    
+
+    energy_penalty = 0
     if state["energy_level"] == "low" and task["energy_required"] == "high":
-        energy_score = -0.5
-
-    stress_bonus = state["stress_level"] * 0.2
-
-    return urgency + energy_score + stress_bonus
+        energy_penalty = -1.5 
+    elif state["energy_level"] == "high" and task["energy_required"] == "high":
+        energy_penalty = 0.5 
+        
+    
+    time_pressure = (480 - state["available_time"]) / 480 
+    
+    stress_bonus = state["stress_level"] * 0.1
+    
+    return urgency + energy_penalty + stress_bonus + time_pressure
 
 def reschedule_tasks(tasks,state):
     task_scores = []

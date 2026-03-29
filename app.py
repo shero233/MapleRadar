@@ -2,162 +2,177 @@ import streamlit as st
 import networkx as nx
 from pyvis.network import Network
 import streamlit.components.v1 as components
+from datetime import datetime, timedelta
 
+
+if 'tasks' not in st.session_state:
+    st.session_state.tasks = []
+if 'user_state' not in st.session_state:
+    st.session_state.user_state = {
+        "available_time": 480,  # 8 hours in mins
+        "energy_level": "medium",
+        "stress_level": 1,
+        "energy_val": 5
+    }
+
+
+def apply_effect(chain):
+    state = st.session_state.user_state
+    steps = chain.split("->")
+    for step in steps:
+        step = step.strip()
+        if "2hrs_Lost" in step or "2hr_Travel" in step:
+            state["available_time"] = max(0, state['available_time'] - 120)
+        elif "Long_Commute" in step or "3hr_Daily" in step:
+            state["available_time"] = max(0, state["available_time"] - 180)
+        elif any(k in step for k in ["Stress", "Anxiety", "Burnout", "Depression"]):
+            state["energy_val"] = max(0, state["energy_val"] - 2)
+            state["stress_level"] += 2
+        elif "Late" in step:
+            state["stress_level"] += 1
+    
+    
+    if state["energy_val"] <= 2: state["energy_level"] = "low"
+    elif state["energy_val"] >= 7: state["energy_level"] = "high"
+    else: state["energy_level"] = "medium"
+
+def score_task(task, state):
+    
+    days_left = max(0, (task["deadline"] - datetime.now()).days)
+    urgency = 1 / (1 + days_left)
+    energy_score = -0.5 if state["energy_level"] == "low" and task["energy_required"] == "high" else 0
+    stress_bonus = state["stress_level"] * 0.1
+    return urgency + energy_score + stress_bonus
 
 st.set_page_config(page_title="MapleRadar", layout="wide")
 
 
-st.markdown("""
-<style>
-    [data-testid="stAppViewContainer"] {
-        background-color: transparent;
-    }
-    [data-testid="stSidebar"] {
-        background-color: transparent;
-    }
-    [data-testid="stTextArea"] textarea, [data-testid="stTextInput"] input {
-        background-color: transparent !important;
-        color: inherit !important;
-        border: 1px solid rgba(49, 51, 63, 0.2) !important;
-    }
-    .block-container {
-        background: transparent;
-        padding: 6rem 1rem 10rem;
-    }
-    header {visibility: visible;}
-</style>
-""", unsafe_allow_html=True)
+st.markdown("""<style>...</style>""", unsafe_allow_html=True)
+
 
 TORONTO_KNOWLEDGE_BASE = {
+    # Housing & Rent
     "Housing Crisis": "Rent_+$400 -> Move_to_North_York -> 3hr_Daily_Commute -> Study_Time_Cut -> GPA_Risk",
-    "Loblaws Inflation": "Loblaws_Price_Spike -> Switch_to_NoFrills -> 2hr_Travel -> Miss_Morning_Class -> Attendance_Warning",
-    "TTC Service Cut": "TTC_Delay -> Late_for_Work -> Wage_Deduction -> Can't_Pay_Phone_Bill -> Mental_Stress",
-    "Job Market Struggle": "Fewer_Part-time_Jobs -> Credit_Card_Debt -> High_Interest -> Debt_Spiral",
-    "Winter Heating": "Hydro_Bill_Surge -> Cut_Heating -> Get_Sick -> Miss_Midterm -> Academic_Probation",
+    "Rental Scam": "Cheap_Listing_Found -> Pay_Deposit -> Ghosted_by_Landlord -> Lose_1500_CAD -> Emergency_Crisis",
+    "Roommate Conflict": "Rent_Too_High -> Shared_Room -> No_Privacy -> Sleep_Deprivation -> Mental_Burnout",
+
+    # TTC & Transit
+    "TTC Service Cut": "TTC_Delay -> Late_for_Work -> Wage_Deduction -> Mental_Stress",
+    "Winter Blizzard": "Heavy_Snow -> TTC_Subway_Closure -> Walk_in_Cold -> Get_Sick -> Miss_Midterm",
+    "Fare Hike": "Presto_Fare_Rise -> Monthly_Budget_Tight -> Skip_Social_Events -> Social_Isolation -> Depression",
+
+    # Cost of Living
+    "Loblaws Inflation": "Loblaws_Price_Spike -> Switch_to_NoFrills -> 2hr_Travel -> Stress",
     "Food Bank Reliance": "Grocery_Cost_Rising -> Paycheck_Shortfall -> Visit_Food_Bank -> Social_Anxiety -> Mental_Burnout",
-    "Scam Risk": "Cheap_Listing_Found -> Pay_Deposit -> Ghosted_by_Landlord -> Lose_1500_CAD -> Emergency_Crisis",
-    "TTC Signal Issues": "Signal_Failure -> Subway_Stops -> Miss_Exam -> Late_Submission_Penalty -> Grade_Drop",
-    "Phone Bill": "Data_Overage -> Rogers_Bill_Surge -> Cut_Dining_Budget -> Social_Isolation -> Depression",
-    "Night Shift": "Rent_Pressure -> Overnight_Shift -> Sleep_Deprivation -> Brain_Fog -> Quiz_Failure",
-    "Rent Trap": "2k rent -> income gap -> no savings -> stuck forever",
-    "Rent Turnover": "move out -> new rent -> 44 percentage higher -> regret move",
-    "Luxury Supply": "new condos -> high prices -> no affordability -> forced sharing",
-    "Loblaws Inflation (Alt)": "price jump -> smaller basket -> poor diet -> low energy",
-    "Food Cut Cycle": "skip groceries -> cheap carbs -> health drop -> sick days",
-    "TTC Delay Chain": "signal delay -> late class -> missed content -> grade drop",
-    "TTC Commute": "long commute -> daily fatigue -> no study -> GPA fall",
-    "Job Market": "high youth unemployment -> no offers -> savings drain -> panic mode",
-    "Resume Void": "apply jobs -> zero replies -> self doubt -> mental crash",
-    "Overwork Loop": "two jobs -> no sleep -> burnout hit -> deadline miss",
-    "Winter Heating (Alt)": "cold winter -> heating surge -> bill stress -> sleep loss",
-    "Library Night": "all night study -> 3h sleep -> miss alarm -> exam fail",
-    "Rent Income Gap": "2.2k rent -> 88k needed -> reality gap -> constant stress",
-    "Roommate Shift": "rent too high -> find roommates -> no privacy -> mental drain",
-    "Migration Drop": "policy cuts -> fewer students -> job scarcity -> income stress",
-    "Currency Pressure": "weak currency -> higher CAD cost -> budget break -> daily anxiety",
-    "CRA Scam": "fake CRA call -> fear spike -> money sent -> regret spiral",
-    "Rental Scam": "fake listing -> deposit paid -> ghost landlord -> housing crisis",
-    "Food Bank Loop": "empty wallet -> food bank -> shame feeling -> isolation grows",
-    "Burnout City": "high cost city -> constant stress -> no rest -> motivation gone",
-    "Tax Rent Shift": "tax increase -> landlord cost -> rent pass -> tenant stress",
-    "Fare Freeze Illusion": "fare freeze -> still delays -> late commute -> job risk",
-    "Transit Cap Trap": "fare cap -> forced rides -> long commute -> time drain",
-    "Grocery Inflation": "food inflation -> smaller basket -> nutrition drop -> fatigue",
-    "Import Dependency": "import reliance -> price spikes -> grocery stress -> diet cuts",
-    "Student Food Program": "free meals -> basic relief -> still hungry -> focus loss",
-    "Library Hours": "longer hours -> late nights -> sleep debt -> burnout hit",
-    "Rent Supply Gap": "new housing -> still expensive -> no access -> shared living",
-    "Inflation Cooling": "inflation slows -> costs still high -> wage gap -> constant stress",
-    "Energy Risk": "oil price spike -> transport cost -> food price -> budget break"
+    "Hydro Bill Surge": "Winter_Heating_Cost -> Hydro_Bill_+$100 -> Cut_Food_Budget -> Poor_Nutrition -> Low_Energy",
+
+    # Job & Academic
+    "Job Market Struggle": "Fewer_Part-time_Jobs -> Credit_Card_Debt -> High_Interest -> Debt_Spiral",
+    "Resume Void": "100_Applications -> 0_Interviews -> Self_Doubt -> Mental_Crash -> Study_Focus_Loss",
+    "Tuition Hike": "International_Fees_Rise -> Extra_Shift_at_Job -> 4am_Bedtime -> Brain_Fog -> Quiz_Failure",
+
+    # Random Hardship
+    "CRA Scam": "Fake_CRA_Call -> Panic_State -> Scammed_Money -> Savings_Drain -> Mental_Breakdown",
+    "Healthcare Delay": "ER_Wait_10hrs -> Condition_Worsens -> Miss_Project_Deadline -> Grade_Penalty"
 }
 
 
 def build_flexible_graph(text):
     G = nx.DiGraph()
-    clean_text = text.replace("_", " ")
-    lines = clean_text.replace("->", "→").split("\n")
-    for line in lines:
-        steps = [s.strip() for s in line.split("→") if s.strip()]
-        if len(steps) > 1:
-            for i in range(len(steps) - 1):
-                G.add_edge(steps[i], steps[i+1])
+    steps = [s.strip().replace("_", " ") for s in text.split("->")]
+    for i in range(len(steps) - 1):
+        G.add_edge(steps[i], steps[i+1])
     return G
 
 def render_graph_html(G):
-    net = Network(height="550px", width="100%", bgcolor="rgba(0,0,0,0)", font_color="#386939", directed=True)
-
+    net = Network(height="400px", width="100%", bgcolor="rgba(0,0,0,0)", font_color="#386939", directed=True)
     for node in G.nodes():
-        is_root = G.in_degree(node) == 0
-        is_end = G.out_degree(node) == 0
-        color = "#386939" if is_root else ("#123418" if is_end else "#93A989")
-
-        net.add_node(
-            node,
-            label=node,
-            color=color,
-            size=25,
-            font={'size': 14, 'face': 'Arial', 'color': 'white' if is_end else '#386939'}
-        )
-
+        net.add_node(node, label=node, color="#386939", size=20, font={'color': 'white'})
     for u, v in G.edges():
-        net.add_edge(u, v, color="#93A989", width=2)
-
-    net.set_options("""
-    var options = {
-      nodes: { shadow: true },
-      edges: { smooth: true },
-      physics: { stabilization: true }
-    }
-    """)
-
+        net.add_edge(u, v, color="#93A989")
     net.save_graph("temp_graph.html")
     return open("temp_graph.html", 'r', encoding='utf-8').read()
 
-# --- 5. Sidebar ---
+
 with st.sidebar:
-    st.markdown("### 🌲 MapleRadar")
-    st.markdown("Toronto Survival Causality")
-
-    clean_options = [k.replace("_", " ") for k in TORONTO_KNOWLEDGE_BASE.keys()]
-    option_mapping = {k.replace("_", " "): k for k in TORONTO_KNOWLEDGE_BASE.keys()}
-
-    selected_display = st.selectbox("Quick Selection", ["🔍 Smart Search"] + clean_options)
+    st.markdown("### 🌲 Task Manager")
+    with st.form("add_task_form"):
+        t_title = st.text_input("Task Title")
+        t_deadline = st.date_input("Deadline", datetime.now() + timedelta(days=1))
+        t_energy = st.selectbox("Energy Required", ["low", "medium", "high"])
+        if st.form_submit_button("Add Task"):
+            new_task = {
+                "title": t_title,
+                "deadline": datetime.combine(t_deadline, datetime.min.time()),
+                "energy_required": t_energy
+            }
+            st.session_state.tasks.append(new_task)
+            st.success("Task Added!")
 
     st.divider()
-    st.markdown(f"**Status:** Online")
-    st.markdown(f"**Database:** 40 Chains")
+    clean_options = list(TORONTO_KNOWLEDGE_BASE.keys())
+    selected_display = st.selectbox("Select Scenario", ["🔍 Search"] + clean_options)
 
+# --- 7. Main Content ---
 st.title("🇨🇦 MapleRadar")
-st.markdown("<p style='color: #6A7B6A;'>Navigating Toronto's Complexity with Causal Intelligence</p>", unsafe_allow_html=True)
 
-col1, col2 = st.columns([2.5, 1])
+col1, col2 = st.columns([2, 1])
 
 with col1:
-    user_input = st.text_input("Search a situation...", placeholder="e.g. Rent, TTC, Job...", label_visibility="collapsed").lower()
-
+    user_input = st.text_input("Search a situation...", placeholder="e.g. Rent, TTC, Loblaws...", key="main_search").strip().lower()
+    
     final_logic = ""
+    
+    
     if user_input:
-        match = next((val for key, val in TORONTO_KNOWLEDGE_BASE.items()
-                      if user_input in key.lower() or user_input in val.lower()), None)
-        final_logic = match if match else (user_input if "->" in user_input else "")
-    elif selected_display != "🔍 Smart Search":
-        final_logic = TORONTO_KNOWLEDGE_BASE[option_mapping[selected_display]]
+        match = next((val for key, val in TORONTO_KNOWLEDGE_BASE.items() 
+                     if user_input in key.lower() or user_input in val.lower()), None)
+        final_logic = match
+        if not final_logic:
+            st.error(f"No results found for '{user_input}'. Try 'Rent' or 'TTC'.")
+    elif selected_display != "🔍 Search":
+        final_logic = TORONTO_KNOWLEDGE_BASE.get(selected_display)
 
+    # 3. 渲染图形
     if final_logic:
+        current_scenario = next((k for k, v in TORONTO_KNOWLEDGE_BASE.items() if v == final_logic), "Custom Scenario")
+        st.subheader(f"Analyzing: {current_scenario}")
+        
+        if st.button("🚨 Simulate Impact", use_container_width=True):
+            apply_effect(final_logic)
+            st.toast(f"Impact of {current_scenario} applied!", icon="🍁") # 增加动态小气泡提示
+
         G = build_flexible_graph(final_logic)
+        
         html_data = render_graph_html(G)
-        components.html(html_data, height=600)
+        components.html(html_data, height=500)
     else:
-        st.markdown("### Ready to Analyze")
+
+        st.info("👋 Welcome! Search a situation above or select a scenario from the sidebar to visualize its impact.")
 
 with col2:
     st.subheader("Survival Analytics")
-
-    risk_level = "Monitor"
-    if final_logic:
-        if any(k in final_logic.lower() for k in ["gpa", "scam", "debt", "crisis", "fail"]):
-            risk_level = "CRITICAL"
-        elif any(k in final_logic.lower() for k in ["delay", "inflation", "bill", "stress"]):
-            risk_level = "WARNING"
-
-    st.metric("Risk Level", risk_level)
+    s = st.session_state.user_state
+    
+    c1, c2 = st.columns(2)
+    c1.metric("Available Time", f"{s['available_time']}m")
+    c2.metric("Energy", s['energy_level'].upper())
+    
+    st.markdown("---")
+    st.subheader("Smart Reschedule") # 改个更有科技感的标题
+    
+    if st.session_state.tasks:
+        scored_tasks = []
+        for t in st.session_state.tasks:
+            score = score_task(t, s)
+            scored_tasks.append((score, t))
+        
+        scored_tasks.sort(key=lambda x: x[0], reverse=True)
+        
+        for score, t in scored_tasks:
+            status_icon = "🔴" if score > 0.8 else ("🟡" if score > 0.5 else "🟢")
+            with st.expander(f"{status_icon} {t['title']} (Priority: {score:.2f})"):
+                st.write(f"**Deadline:** {t['deadline'].date()}")
+                st.write(f"**Energy Required:** {t['energy_required']}")
+    else:
+        st.write("No tasks to prioritize. Stay chill! ☕")
